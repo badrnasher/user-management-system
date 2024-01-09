@@ -19,21 +19,6 @@ type User struct {
 	Email string `json:"email"`
 }
 
-func main() {
-	initDB()
-	defer closeDB()
-
-	router := gin.Default()
-
-	router.GET("/api/users", getUsers)
-	router.GET("/api/users/:id", getUser)
-	router.POST("/api/users", saveUser)
-	router.PUT("/api/users/:id", updateUser)
-	router.DELETE("/api/users/:id", deleteUser)
-
-	router.Run(":8080")
-}
-
 func initDB() {
 	var err error
 	db, err = gorm.Open(sqlite.Open("./db.sqlite"), &gorm.Config{})
@@ -53,6 +38,21 @@ func closeDB() {
 	if sqlDB != nil {
 		sqlDB.Close()
 	}
+}
+
+func main() {
+	initDB()
+	defer closeDB()
+
+	router := gin.Default()
+
+	router.GET("/api/users", getUsers)
+	router.GET("/api/users/:id", getUser)
+	router.POST("/api/users", saveUser)
+	router.PUT("/api/users/:id", updateUser)
+	router.DELETE("/api/users/:id", deleteUser)
+
+	router.Run(":8080")
 }
 
 func getUsers(c *gin.Context) {
