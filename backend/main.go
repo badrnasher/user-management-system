@@ -1,19 +1,27 @@
-// main.go
 package main
 
 import (
 	"database/sql"
 	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-var db *sql.DB
+var db *gorm.DB
+var sqlDB *sql.DB
+
+type User struct {
+	ID    uint   `json:"id" gorm:"primaryKey"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
 
 func main() {
 	initDB()
-	defer db.Close()
+	defer closeDB()
 
 	router := gin.Default()
 
@@ -28,113 +36,75 @@ func main() {
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite3", "./database.db")
+	db, err = gorm.Open(sqlite.Open("./db.sqlite"), &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			email TEXT NOT NULL
-		)
-	`)
+	sqlDB, err = db.DB()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	db.AutoMigrate(&User{})
 }
 
-type User struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	Emai string `json:"email"`
+func closeDB() {
+	if sqlDB != nil {
+		sqlDB.Close()
+	}
 }
 
 func getUsers(c *gin.Context) {
 	var users []User
-
-	rows, err := db.Query("SELECT id, name, email FROM users")
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
-		return
-	}
-
-	for rows.Next() {
-		var user User
-		rows.Scan(&user.ID, &user.Name, &user.Emai)
-		users = append(users, user)
-	}
-
-	c.JSON(200, users)
+	db.Find(&users)
+	c.JSON(http.StatusOK, users)
 }
 
 func getUser(c *gin.Context) {
 	var user User
 	id := c.Param("id")
-
-	row := db.QueryRow("SELECT id, name, email FROM users WHERE id = ?", id)
-	err := row.Scan(&user.ID, &user.Name, &user.Emai)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
+	if err := db.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
-
-	c.JSON(200, user)
+	c.JSON(http.StatusOK, user)
 }
 
 func saveUser(c *gin.Context) {
 	var user User
-
-	err := c.BindJSON(&user)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	stmt, _ := db.Prepare("INSERT INTO users (name, email) VALUES (?, ?)")
-	result, err := stmt.Exec(user.Name, user.Emai)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
-		return
-	}
-
-	id, _ := result.LastInsertId()
-
-	user.ID = int(id)
-
-	c.JSON(200, user)
+	db.Create(&user)
+	c.JSON(http.StatusCreated, user)
 }
 
 func updateUser(c *gin.Context) {
 	var user User
 	id := c.Param("id")
 
-	err := c.BindJSON(&user)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
+	if err := db.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	stmt, _ := db.Prepare("UPDATE users SET name = ?, email = ? WHERE id = ?")
-	_, err = stmt.Exec(user.Name, user.Emai, id)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	c.JSON(200, user)
+	db.Save(&user)
+	c.JSON(http.StatusOK, user)
 }
 
 func deleteUser(c *gin.Context) {
 	id := c.Param("id")
-
-	stmt, _ := db.Prepare("DELETE FROM users WHERE id = ?")
-	_, err := stmt.Exec(id)
-	if err != nil {
-		c.JSON(500, gin.H{"message": err.Error()})
+	if err := db.Delete(&User{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(200, gin.H{"message": "User deleted"})
+	c.JSON(http.StatusNoContent, nil)
 }
